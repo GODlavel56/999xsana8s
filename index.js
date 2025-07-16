@@ -1,9 +1,8 @@
-// NİHAİ "ZIRHLI" KOD - TÜM GELİŞTİRMELER EKLENDİ
+// AFK ÖNLEME MEKANİZMASI TAMAMEN KALDIRILMIŞ TEST KODU
 const http = require('http');
 const { Client } = require('discord.js-self');
 require('dotenv').config();
 
-// --- YENİ: MOBİL KULLANICI TAKLİDİ ---
 const client = new Client({
   ws: {
     properties: {
@@ -14,34 +13,27 @@ const client = new Client({
   },
   checkUpdate: false
 });
-// ------------------------------------
 
 let voiceConnection = null;
-const RECONNECT_DELAY = 15000; // 15 saniye
-// ChatGPT Önerisi: Kontrol aralığı 3 dakika
-const STAY_ALIVE_INTERVAL = 180000; // 3 dakika
-
-function getRandomDelay(min = 2000, max = 5000) {
-  return Math.floor(Math.random() * (max - min + 1) + min);
-}
+const RECONNECT_DELAY = 15000;
 
 client.on('ready', async () => {
   console.log(`✅ ${client.user.username} olarak giriş yapıldı!`);
   await joinChannel();
-  setTimeout(stayActive, STAY_ALIVE_INTERVAL);
   
-  // --- YENİ: GÜNLÜK OTOMATİK YENİDEN BAŞLATMA ---
+  // Günlük restart özelliği stabilite için kalmaya devam ediyor
   setTimeout(() => {
     console.log("♻️ 24 saatlik çalışma süresi doldu. Stabilite için otomatik yeniden başlatılıyor...");
-    process.exit(0); // Programı sonlandır, Render otomatik olarak yeniden başlatacak
-  }, 1000 * 60 * 60 * 24); // 24 saat
-  // -----------------------------------------
+    process.exit(0);
+  }, 1000 * 60 * 60 * 24);
 });
 
+// Bu kısım, botun birisi tarafından manuel atılması veya bağlantısının anlık kopması durumunda çalışır.
+// AFK nedeniyle atılmasını engellemez.
 client.on('voiceStateUpdate', (oldState, newState) => {
   if (oldState.id === client.user.id && oldState.channelID && !newState.channelID) {
-    console.log(`⚠️ Ses kanalından bağlantı koptu. Olay algılandı, yeniden bağlanılıyor...`);
-    if(voiceConnection) voiceConnection.destroy?.();
+    console.log(`⚠️ Ses kanalından düşüldü. Olay algılandı, yeniden bağlanılıyor...`);
+    voiceConnection?.destroy?.();
     voiceConnection = null;
     setTimeout(joinChannel, RECONNECT_DELAY);
   }
@@ -49,68 +41,39 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 
 async function joinChannel() {
   if (voiceConnection && voiceConnection.channel) return;
-  
+
   console.log(`🔗 Ses kanalına bağlanma deneniyor...`);
   const voiceChannelId = process.env.VOICE_CHANNEL_ID;
   if (!voiceChannelId) return console.error("❌ HATA: VOICE_CHANNEL_ID bulunamadı!");
-  
+
   try {
     const channel = await client.channels.fetch(voiceChannelId);
-    if (channel && channel.type === 'voice') {
+    if (channel?.type === 'voice') {
       voiceConnection = await channel.join();
-      console.log(`🎧 "${channel.name}" kanalına başarıyla bağlandı!`);
+      console.log(`🎧 "${channel.name}" kanalına başarıyla bağlandı.`);
     } else {
-      console.error(`❌ HATA: Kanal bulunamadı veya bu bir ses kanalı değil.`);
+      console.error("❌ HATA: Kanal bulunamadı veya bu bir ses kanalı değil.");
     }
   } catch (error) {
-    console.error(`❌ Bağlanma hatası:`, error.message);
+    console.error(`❌ Kanal bağlanma hatası:`, error.message);
     setTimeout(joinChannel, RECONNECT_DELAY);
   }
 }
 
-async function stayActive() {
-  // --- YENİ: DAHA GELİŞMİŞ KONTROL ---
-  const isConnected = voiceConnection && voiceConnection.channel && voiceConnection.channel.members.has(client.user.id);
-  console.log(`📢 Aktif Kalma Kontrolü: Gerçek bağlantı durumu: ${isConnected ? 'Bağlı' : 'Kopuk'}`);
-
-  if (!isConnected) {
-    console.log(`📢 Bağlantı kopuk görünüyor. Yeniden bağlanma tetikleniyor.`);
-    await joinChannel();
-  } else {
-    console.log(`📢 AFK önleme: "${voiceConnection.channel.name}" kanalından çıkıp tekrar giriliyor...`);
-    try {
-      const currentChannel = voiceConnection.channel;
-      await currentChannel.leave();
-      // --- YENİ: HAFIZA TEMİZLİĞİ ---
-      voiceConnection.destroy?.(); 
-      voiceConnection = null;
-      // ----------------------------
-      console.log(`📢 Başarıyla kanaldan ayrıldı. Kısa bir süre bekleniyor...`);
-      await new Promise(resolve => setTimeout(resolve, getRandomDelay()));
-      voiceConnection = await currentChannel.join();
-      console.log(`📢 Başarıyla kanala tekrar girildi.`);
-    } catch(error) {
-        console.error(`📢 AFK önleme (çık-gir) hatası:`, error.message);
-    }
-  }
-  // ---------------------------------
-  
-  setTimeout(stayActive, STAY_ALIVE_INTERVAL);
-}
-
 const token = process.env.TOKEN;
-if (!token) {
-  console.error("❌ HATA: TOKEN bulunamadı!");
+if (token) {
+  client.login(token).catch(err => console.error("❌ Giriş yapılamadı! Token geçersiz olabilir:", err.message));
 } else {
-  client.login(token).catch(err => {
-    console.error("❌ Giriş yapılamadı! Token geçersiz olabilir:", err.message);
-  });
+  console.error("❌ HATA: TOKEN ortam değişkeni bulunamadı!");
 }
 
-process.on('unhandledRejection', error => console.error('❌ YAKALANAMAYAN HATA:', error));
-process.on('uncaughtException', error => console.error('❌ YAKALANAMAYAN HATA:', error));
+process.on('unhandledRejection', error => console.error('❌ YAKALANAMAYAN HATA (Promise):', error));
+process.on('uncaughtException', error => {
+  console.error('❌ YAKALANAMAYAN HATA (Genel):', error);
+  process.exit(1);
+});
 
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Bot aktif ve seste!');
+  res.end('Bot aktif ve seste! (AFK Koruması Kapalı)');
 }).listen(3000);
