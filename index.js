@@ -1,45 +1,58 @@
-// UZUN SÜRELİ STABİLİTE İÇİN GELİŞTİRİLMİŞ KOD
+// NİHAİ "ZIRHLI" KOD - TÜM GELİŞTİRMELER EKLENDİ
 const http = require('http');
 const { Client } = require('discord.js-self');
 require('dotenv').config();
 
-const client = new Client();
-let voiceConnection = null;
-const RECONNECT_DELAY = 15000; // Yeniden bağlanma bekleme süresini 15 saniyeye çıkardık
+// --- YENİ: MOBİL KULLANICI TAKLİDİ ---
+const client = new Client({
+  ws: {
+    properties: {
+      os: "iOS",
+      browser: "Discord iOS",
+      device: "iPhone",
+    }
+  },
+  checkUpdate: false
+});
+// ------------------------------------
 
-// --- YENİ: Daha "insansı" zamanlama için ---
-// Her 3 ila 5 dakika arasında rastgele bir zamanda "aktif kalma" sinyali gönderir.
-function getRandomStayAliveInterval() {
-  const min = 3 * 60 * 1000; // 3 dakika
-  const max = 5 * 60 * 1000; // 5 dakika
+let voiceConnection = null;
+const RECONNECT_DELAY = 15000; // 15 saniye
+// ChatGPT Önerisi: Kontrol aralığı 3 dakika
+const STAY_ALIVE_INTERVAL = 180000; // 3 dakika
+
+function getRandomDelay(min = 2000, max = 5000) {
   return Math.floor(Math.random() * (max - min + 1) + min);
 }
 
 client.on('ready', async () => {
   console.log(`✅ ${client.user.username} olarak giriş yapıldı!`);
   await joinChannel();
-  // İlk "aktif kalma" kontrolünü rastgele bir süre sonra başlat
-  setTimeout(stayActive, getRandomStayAliveInterval());
+  setTimeout(stayActive, STAY_ALIVE_INTERVAL);
+  
+  // --- YENİ: GÜNLÜK OTOMATİK YENİDEN BAŞLATMA ---
+  setTimeout(() => {
+    console.log("♻️ 24 saatlik çalışma süresi doldu. Stabilite için otomatik yeniden başlatılıyor...");
+    process.exit(0); // Programı sonlandır, Render otomatik olarak yeniden başlatacak
+  }, 1000 * 60 * 60 * 24); // 24 saat
+  // -----------------------------------------
 });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
   if (oldState.id === client.user.id && oldState.channelID && !newState.channelID) {
     console.log(`⚠️ Ses kanalından bağlantı koptu. Olay algılandı, yeniden bağlanılıyor...`);
+    if(voiceConnection) voiceConnection.destroy?.();
     voiceConnection = null;
     setTimeout(joinChannel, RECONNECT_DELAY);
   }
 });
 
 async function joinChannel() {
-  // Eğer zaten bağlıysak tekrar denemeye gerek yok
-  if (voiceConnection && voiceConnection.channel) {
-    console.log(`ℹ️ Zaten bir kanalda. Yeniden bağlanma işlemi atlandı.`);
-    return;
-  }
+  if (voiceConnection && voiceConnection.channel) return;
   
   console.log(`🔗 Ses kanalına bağlanma deneniyor...`);
   const voiceChannelId = process.env.VOICE_CHANNEL_ID;
-  if (!voiceChannelId) return console.error("❌ HATA: VOICE_CHANNEL_ID ortam değişkeni bulunamadı!");
+  if (!voiceChannelId) return console.error("❌ HATA: VOICE_CHANNEL_ID bulunamadı!");
   
   try {
     const channel = await client.channels.fetch(voiceChannelId);
@@ -51,50 +64,51 @@ async function joinChannel() {
     }
   } catch (error) {
     console.error(`❌ Bağlanma hatası:`, error.message);
-    // Başarısız olursa bir süre sonra tekrar dene
     setTimeout(joinChannel, RECONNECT_DELAY);
   }
 }
 
-// --- YENİ: Kendi kendini kontrol eden ve iyileştiren "Aktif Kalma" fonksiyonu ---
 async function stayActive() {
-  // 1. Bağlantı var mı diye kontrol et
-  if (!voiceConnection || !voiceConnection.channel) {
-    console.log(`📢 Aktif Kalma Kontrolü: Bağlantı kopuk görünüyor. Yeniden bağlanma tetikleniyor.`);
+  // --- YENİ: DAHA GELİŞMİŞ KONTROL ---
+  const isConnected = voiceConnection && voiceConnection.channel && voiceConnection.channel.members.has(client.user.id);
+  console.log(`📢 Aktif Kalma Kontrolü: Gerçek bağlantı durumu: ${isConnected ? 'Bağlı' : 'Kopuk'}`);
+
+  if (!isConnected) {
+    console.log(`📢 Bağlantı kopuk görünüyor. Yeniden bağlanma tetikleniyor.`);
     await joinChannel();
   } else {
-    // 2. Bağlantı varsa, "konuşuyor" sinyali gönder
+    console.log(`📢 AFK önleme: "${voiceConnection.channel.name}" kanalından çıkıp tekrar giriliyor...`);
     try {
-      console.log(`📢 Aktif Kalma Kontrolü: Bağlantı yerinde. "Konuşuyor" sinyali gönderiliyor.`);
-      voiceConnection.setSpeaking(true);
-      setTimeout(() => {
-        if (voiceConnection) voiceConnection.setSpeaking(false);
-      }, 500);
-    } catch (error) {
-      console.error(`📢 'Aktif Kalma' sinyali hatası:`, error.message);
+      const currentChannel = voiceConnection.channel;
+      await currentChannel.leave();
+      // --- YENİ: HAFIZA TEMİZLİĞİ ---
+      voiceConnection.destroy?.(); 
+      voiceConnection = null;
+      // ----------------------------
+      console.log(`📢 Başarıyla kanaldan ayrıldı. Kısa bir süre bekleniyor...`);
+      await new Promise(resolve => setTimeout(resolve, getRandomDelay()));
+      voiceConnection = await currentChannel.join();
+      console.log(`📢 Başarıyla kanala tekrar girildi.`);
+    } catch(error) {
+        console.error(`📢 AFK önleme (çık-gir) hatası:`, error.message);
     }
   }
+  // ---------------------------------
   
-  // 3. Bir sonraki kontrol için tekrar rastgele bir zamanlayıcı kur
-  setTimeout(stayActive, getRandomStayAliveInterval());
+  setTimeout(stayActive, STAY_ALIVE_INTERVAL);
 }
 
 const token = process.env.TOKEN;
 if (!token) {
-  console.error("❌ HATA: TOKEN ortam değişkeni bulunamadı!");
+  console.error("❌ HATA: TOKEN bulunamadı!");
 } else {
   client.login(token).catch(err => {
-    console.error("❌ Giriş yapılamadı! Token geçersiz olabilir. Hata:", err.message);
+    console.error("❌ Giriş yapılamadı! Token geçersiz olabilir:", err.message);
   });
 }
 
-// Olası çökmeleri yakalamak için eklenen güvenlik önlemleri
-process.on('unhandledRejection', error => {
-  console.error('❌ YAKALANAMAYAN HATA (unhandledRejection):', error);
-});
-process.on('uncaughtException', error => {
-  console.error('❌ YAKALANAMAYAN HATA (uncaughtException):', error);
-});
+process.on('unhandledRejection', error => console.error('❌ YAKALANAMAYAN HATA:', error));
+process.on('uncaughtException', error => console.error('❌ YAKALANAMAYAN HATA:', error));
 
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
